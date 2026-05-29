@@ -74,10 +74,21 @@ def lunar_to_solar(anchor: LunarAnchor) -> Optional[date]:
         return None
 
 
-def parse_mmdd(value: str) -> tuple[int, int]:
-    m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", value.strip())
+def parse_gregorian_date(value: str) -> date:
+    m = re.fullmatch(r"\s*(\d{4})[-./](\d{1,2})[-./](\d{1,2})\s*", value)
     if not m:
-        raise argparse.ArgumentTypeError("Use MM-DD format, e.g. 05-08.")
+        raise argparse.ArgumentTypeError("Use YYYY-MM-DD, YYYY/M/D, or YYYY.M.D format, e.g. 2004-07-24.")
+    year, month, day = map(int, m.groups())
+    try:
+        return date(year, month, day)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def parse_mmdd(value: str) -> tuple[int, int]:
+    m = re.fullmatch(r"\s*(\d{1,2})[-./](\d{1,2})\s*", value.strip())
+    if not m:
+        raise argparse.ArgumentTypeError("Use MM-DD, MM/DD, or MM.DD format, e.g. 05-08.")
     month, day = int(m.group(1)), int(m.group(2))
     try:
         date(2000, month, day)
@@ -255,6 +266,20 @@ def fitted_value(year: float, result: FitResult) -> float:
     return total
 
 
+def find_next_exact_year(rows: list[GapRow], after_year: int) -> Optional[int]:
+    for row in rows:
+        if row.gap_days == 0 and row.year > after_year:
+            return row.year
+    return None
+
+
+def get_row_for_year(rows: list[GapRow], year: int) -> Optional[GapRow]:
+    for row in rows:
+        if row.year == year:
+            return row
+    return None
+
+
 def write_csv(rows: list[GapRow], path: Path) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0]).keys()))
@@ -270,7 +295,29 @@ def write_formula(result: FitResult, path: Path) -> None:
 
 def write_report(result: FitResult, rows: list[GapRow], path: Path) -> None:
     exact = [r.year for r in rows if r.gap_days == 0]
-    text = f"""# Lunar Gap Fit Report\n\nMode: `{result.mode}`\n\nSolar anchor: `{result.solar_month:02d}-{result.solar_day:02d}`\n\nLunar anchor: `{result.lunar_anchor['month']}-{result.lunar_anchor['day']}`\n\nMatch mode: `{result.match_mode}`\n\nSelected period: `{result.selected_period:g}`\n\nSelected harmonics: `{result.selected_harmonics}`\n\nMAE: `{result.mae:.4f}` days  \nRMSE: `{result.rmse:.4f}` days  \nR²: `{result.r2:.6f}`  \nBIC: `{result.bic:.4f}`\n\nExact coincidence years:\n\n{', '.join(map(str, exact)) if exact else 'None'}\n"""
+    text = f"""# Lunar Gap Fit Report
+
+Mode: `{result.mode}`
+
+Solar anchor: `{result.solar_month:02d}-{result.solar_day:02d}`
+
+Lunar anchor: `{result.lunar_anchor['month']}-{result.lunar_anchor['day']}`
+
+Match mode: `{result.match_mode}`
+
+Selected period: `{result.selected_period:g}`
+
+Selected harmonics: `{result.selected_harmonics}`
+
+MAE: `{result.mae:.4f}` days  
+RMSE: `{result.rmse:.4f}` days  
+R²: `{result.r2:.6f}`  
+BIC: `{result.bic:.4f}`
+
+Exact coincidence years:
+
+{', '.join(map(str, exact)) if exact else 'None'}
+"""
     path.write_text(text, encoding="utf-8")
 
 
@@ -306,15 +353,15 @@ def resolve_mode(args):
         return "manual", None, sm, sd, anchor
     if not args.date:
         raise ValueError("Provide a date, or use manual mode.")
-    d = datetime.strptime(args.date, "%Y-%m-%d").date()
+    d = parse_gregorian_date(args.date)
     anchor = solar_to_lunar(d)
     return "auto", d, d.month, d.day, anchor
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fit Gregorian-lunar date gaps with a Fourier model.")
-    parser.add_argument("date", nargs="?", help="Gregorian date, e.g. 2004-07-24")
-    parser.add_argument("--solar", type=parse_mmdd, help="Manual solar anchor, MM-DD")
+    parser.add_argument("date", nargs="?", help="Gregorian date, e.g. 2004-07-24, 2004/7/24, or 2004.7.24")
+    parser.add_argument("--solar", type=parse_mmdd, help="Manual solar anchor, MM-DD, MM/DD, or MM.DD")
     parser.add_argument("--lunar-month", type=int, help="Manual lunar month, 1..12")
     parser.add_argument("--lunar-day", type=int, help="Manual lunar day, 1..30")
     parser.add_argument("--lunar-leap", action="store_true", help="Use leap lunar month")
@@ -326,6 +373,10 @@ def main() -> None:
     parser.add_argument("--candidate-periods", default="8,11,19,38,57,76,95,114,133,152,171,190")
     parser.add_argument("--out", default=None)
     parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--predict-year", type=int, help="Print fitted and actual gap for a target year")
+    parser.add_argument("--find-next-coincidence", action="store_true", help="Find the next exact Gregorian-lunar coincidence year")
+    parser.add_argument("--after-year", type=int, help="Search for next coincidence after this year")
+    parser.add_argument("--birthday-mode", action="store_true", help="Find the next birthday coincidence after the input birth year")
     args = parser.parse_args()
 
     mode, input_date, sm, sd, anchor = resolve_mode(args)
@@ -354,6 +405,34 @@ def main() -> None:
     print(f"Selected harmonics: {result.selected_harmonics}")
     print(f"MAE={result.mae:.4f}, RMSE={result.rmse:.4f}, R^2={result.r2:.6f}, BIC={result.bic:.4f}")
     print(f"Exact coincidence years: {exact if exact else 'None'}")
+
+    if args.predict_year is not None:
+        predicted = fitted_value(args.predict_year, result)
+        print(f"Predicted fitted gap for {args.predict_year}: {predicted:.4f} days, rounded {round(predicted)} days")
+        row = get_row_for_year(rows, args.predict_year)
+        if row and row.gap_days is not None:
+            print(f"Actual gap for {args.predict_year}: {row.gap_days} days; matched lunar date: {row.lunar_match_date}")
+        else:
+            print(f"Actual gap for {args.predict_year}: unavailable in generated range {args.start}-{args.end}")
+
+    if args.find_next_coincidence or args.birthday_mode:
+        if args.after_year is not None:
+            after_year = args.after_year
+        elif args.birthday_mode and input_date is not None:
+            after_year = input_date.year
+        else:
+            after_year = args.start - 1
+        next_year = find_next_exact_year(rows, after_year)
+        label = "Next birthday coincidence year" if args.birthday_mode else "Next exact coincidence year"
+        if next_year is None:
+            print(f"{label}: not found in generated range {args.start}-{args.end} after {after_year}")
+        else:
+            next_row = get_row_for_year(rows, next_year)
+            print(f"{label}: {next_year}")
+            if input_date is not None:
+                print(f"Years after input date: {next_year - input_date.year}")
+            if next_row and next_row.solar_anchor:
+                print(f"Coincidence date: {next_row.solar_anchor}")
 
 
 if __name__ == "__main__":
