@@ -10,6 +10,7 @@ It can:
 - fit the gap sequence with a Fourier model;
 - predict fitted gaps for a target year;
 - find the next year when the Gregorian and lunar anchors exactly coincide;
+- provide birthday-style coincidence summaries;
 - export CSV data, model coefficients, a standalone fitted function, a plot, and a Markdown report.
 
 ## Why this exists
@@ -46,7 +47,7 @@ After installation, the console command also works:
 lunar-gap-fit 2004-07-24 --out out_2004_07_24
 ```
 
-The input date can use hyphens, slashes, or dots. Single-digit month/day values are also supported:
+The input date can use hyphens, slashes, or dots. Single-digit month/day values are supported:
 
 ```text
 YYYY-MM-DD
@@ -75,9 +76,21 @@ Example: Gregorian May 8 vs lunar March 23.
 lunar-gap-fit --solar 05-08 --lunar-month 3 --lunar-day 23 --out out_0508_lunar_0323
 ```
 
-The `--solar` value also supports `MM-DD`, `MM/DD`, and `MM.DD`:
+The `--solar` value supports:
+
+```text
+MM-DD
+M-D
+MM/DD
+M/D
+MM.DD
+M.D
+```
+
+Examples:
 
 ```bash
+lunar-gap-fit --solar 5-8 --lunar-month 3 --lunar-day 23
 lunar-gap-fit --solar 5/8 --lunar-month 3 --lunar-day 23
 lunar-gap-fit --solar 5.8 --lunar-month 3 --lunar-day 23
 ```
@@ -102,18 +115,18 @@ Force the matched lunar date to be inside the same Gregorian year:
 lunar-gap-fit 2004-07-24 --match-same-gregorian-year
 ```
 
-## Coincidence and birthday helpers
+## Helper options
+
+Predict the fitted gap for a target year:
+
+```bash
+lunar-gap-fit 2004-07-24 --predict-year 2042
+```
 
 Find the next exact coincidence year after the input year:
 
 ```bash
 lunar-gap-fit 2004-07-24 --find-next-coincidence
-```
-
-Birthday shortcut:
-
-```bash
-lunar-gap-fit 2004-07-24 --birthday-mode
 ```
 
 Search after a specific year:
@@ -122,10 +135,43 @@ Search after a specific year:
 lunar-gap-fit 2004-07-24 --find-next-coincidence --after-year 2026
 ```
 
-Predict the fitted gap for a target year:
+Birthday shortcut:
 
 ```bash
-lunar-gap-fit 2004-07-24 --predict-year 2042
+lunar-gap-fit 2004-07-24 --birthday-mode
+```
+
+Print an additional human-friendly summary block:
+
+```bash
+lunar-gap-fit 2004-07-24 --birthday-mode --predict-year 2042 --pretty --no-plot
+```
+
+Common helper flags:
+
+```text
+--predict-year YEAR
+--find-next-coincidence
+--after-year YEAR
+--birthday-mode
+--pretty
+```
+
+Example pretty output:
+
+```text
+== Lunar Gap Fit Summary ==
+Solar anchor      : 07-24
+Lunar anchor      : 6/8
+Match mode        : nearest
+Best Fourier fit  : period=76, harmonics=1
+Fit error         : MAE=9.40 days, RMSE=26.31 days
+Exact years       : 1909, 1928, 1939, 1958, 2004, 2042, 2061, 2080
+Prediction 2042   : fitted gap 0.12 days, rounded 0 days; actual 0 days
+Next birthday hit : 2042-07-24 (age 38)
+Time from today   : 16 years and 56 days (5900 days total)
+Output folder     : out_2004-07-24
+=============================
 ```
 
 ## Period selection
@@ -177,6 +223,18 @@ Run tests:
 
 ```bash
 python tests/test_basic.py
+```
+
+Manual smoke commands:
+
+```bash
+python -m lunar_gap_fit 2004-07-24 --no-plot
+python -m lunar_gap_fit 2005.2.4 --no-plot
+python -m lunar_gap_fit 2005/2/4 --no-plot
+python -m lunar_gap_fit 2004-07-24 --predict-year 2042 --no-plot
+python -m lunar_gap_fit 2004-07-24 --find-next-coincidence --after-year 2026 --no-plot
+python -m lunar_gap_fit 2004-07-24 --birthday-mode --no-plot
+python -m lunar_gap_fit 2004-07-24 --birthday-mode --predict-year 2042 --pretty --no-plot
 ```
 
 ## Notes
