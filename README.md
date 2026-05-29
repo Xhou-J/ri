@@ -8,6 +8,8 @@ It can:
 - generate a 1901–2100 year-by-year day-gap sequence;
 - manually compare a Gregorian anchor such as `05-08` with a lunar anchor such as lunar `3/23`;
 - fit the gap sequence with a Fourier model;
+- predict fitted gaps for a target year;
+- find the next year when the Gregorian and lunar anchors exactly coincide;
 - export CSV data, model coefficients, a standalone fitted function, a plot, and a Markdown report.
 
 ## Why this exists
@@ -44,16 +46,23 @@ After installation, the console command also works:
 lunar-gap-fit 2004-07-24 --out out_2004_07_24
 ```
 
-The input date must use hyphens:
+The input date can use hyphens, slashes, or dots. Single-digit month/day values are also supported:
 
 ```text
 YYYY-MM-DD
+YYYY-M-D
+YYYY/MM/DD
+YYYY/M/D
+YYYY.MM.DD
+YYYY.M.D
 ```
 
-For example:
+Examples:
 
 ```bash
 lunar-gap-fit 2008-07-10 --out out_2008_07_10
+lunar-gap-fit 2008/7/10 --out out_2008_07_10
+lunar-gap-fit 2008.7.10 --out out_2008_07_10
 ```
 
 ## Manual anchor mode
@@ -64,6 +73,13 @@ Example: Gregorian May 8 vs lunar March 23.
 
 ```bash
 lunar-gap-fit --solar 05-08 --lunar-month 3 --lunar-day 23 --out out_0508_lunar_0323
+```
+
+The `--solar` value also supports `MM-DD`, `MM/DD`, and `MM.DD`:
+
+```bash
+lunar-gap-fit --solar 5/8 --lunar-month 3 --lunar-day 23
+lunar-gap-fit --solar 5.8 --lunar-month 3 --lunar-day 23
 ```
 
 Leap lunar month example:
@@ -84,6 +100,32 @@ Force the matched lunar date to be inside the same Gregorian year:
 
 ```bash
 lunar-gap-fit 2004-07-24 --match-same-gregorian-year
+```
+
+## Coincidence and birthday helpers
+
+Find the next exact coincidence year after the input year:
+
+```bash
+lunar-gap-fit 2004-07-24 --find-next-coincidence
+```
+
+Birthday shortcut:
+
+```bash
+lunar-gap-fit 2004-07-24 --birthday-mode
+```
+
+Search after a specific year:
+
+```bash
+lunar-gap-fit 2004-07-24 --find-next-coincidence --after-year 2026
+```
+
+Predict the fitted gap for a target year:
+
+```bash
+lunar-gap-fit 2004-07-24 --predict-year 2042
 ```
 
 ## Period selection
