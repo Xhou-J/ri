@@ -6,7 +6,7 @@ import json
 import math
 import re
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -280,6 +280,61 @@ def get_row_for_year(rows: list[GapRow], year: int) -> Optional[GapRow]:
     return None
 
 
+def format_exact_years(years: list[int], limit: int = 12) -> str:
+    if not years:
+        return "None"
+    shown = years[:limit]
+    suffix = "" if len(years) <= limit else f", ... (+{len(years) - limit} more)"
+    return ", ".join(map(str, shown)) + suffix
+
+
+def format_pretty_summary(
+    result: FitResult,
+    exact_years: list[int],
+    *,
+    input_date: Optional[date] = None,
+    predict_year: Optional[int] = None,
+    predicted_gap: Optional[float] = None,
+    predicted_row: Optional[GapRow] = None,
+    next_year: Optional[int] = None,
+    next_row: Optional[GapRow] = None,
+    birthday_mode: bool = False,
+) -> str:
+    lunar_leap = "leap " if result.lunar_anchor.get("is_leap") else ""
+    lines = [
+        "",
+        "== Lunar Gap Fit Summary ==",
+        f"Solar anchor      : {result.solar_month:02d}-{result.solar_day:02d}",
+        f"Lunar anchor      : {lunar_leap}{result.lunar_anchor['month']}/{result.lunar_anchor['day']}",
+        f"Match mode        : {result.match_mode}",
+        f"Best Fourier fit  : period={result.selected_period:g}, harmonics={result.selected_harmonics}",
+        f"Fit error         : MAE={result.mae:.2f} days, RMSE={result.rmse:.2f} days, R^2={result.r2:.4f}",
+        f"Exact years       : {format_exact_years(exact_years)}",
+    ]
+
+    if predict_year is not None and predicted_gap is not None:
+        line = f"Prediction {predict_year} : fitted gap {predicted_gap:.2f} days, rounded {round(predicted_gap)} days"
+        if predicted_row and predicted_row.gap_days is not None:
+            line += f"; actual {predicted_row.gap_days} days"
+        lines.append(line)
+
+    if next_year is not None:
+        if birthday_mode and input_date is not None:
+            age = next_year - input_date.year
+            if next_row and next_row.solar_anchor:
+                lines.append(f"Next birthday hit : {next_row.solar_anchor} (age {age})")
+            else:
+                lines.append(f"Next birthday hit : {next_year} (age {age})")
+        elif next_row and next_row.solar_anchor:
+            lines.append(f"Next coincidence  : {next_row.solar_anchor}")
+        else:
+            lines.append(f"Next coincidence  : {next_year}")
+
+    lines.append(f"Output folder     : out_{input_date.isoformat() if input_date else f'{result.solar_month:02d}_{result.solar_day:02d}'}")
+    lines.append("=============================")
+    return "\n".join(lines)
+
+
 def write_csv(rows: list[GapRow], path: Path) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(asdict(rows[0]).keys()))
@@ -289,7 +344,7 @@ def write_csv(rows: list[GapRow], path: Path) -> None:
 
 
 def write_formula(result: FitResult, path: Path) -> None:
-    content = f'''import math\n\nSELECTED_PERIOD = {result.selected_period!r}\nSELECTED_HARMONICS = {result.selected_harmonics!r}\nY0 = {result.start_year!r}\nINTERCEPT = {result.intercept!r}\nCOS = {result.cos_coefficients!r}\nSIN = {result.sin_coefficients!r}\n\ndef gap_fit(year: float) -> float:\n    total = INTERCEPT\n    for k in range(1, SELECTED_HARMONICS + 1):\n        angle = 2 * math.pi * k * (year - Y0) / SELECTED_PERIOD\n        total += COS[k - 1] * math.cos(angle)\n        total += SIN[k - 1] * math.sin(angle)\n    return total\n\ndef gap_fit_rounded(year: float) -> int:\n    return round(gap_fit(year))\n'''
+    content = f"""import math\n\nSELECTED_PERIOD = {result.selected_period!r}\nSELECTED_HARMONICS = {result.selected_harmonics!r}\nY0 = {result.start_year!r}\nINTERCEPT = {result.intercept!r}\nCOS = {result.cos_coefficients!r}\nSIN = {result.sin_coefficients!r}\n\ndef gap_fit(year: float) -> float:\n    total = INTERCEPT\n    for k in range(1, SELECTED_HARMONICS + 1):\n        angle = 2 * math.pi * k * (year - Y0) / SELECTED_PERIOD\n        total += COS[k - 1] * math.cos(angle)\n        total += SIN[k - 1] * math.sin(angle)\n    return total\n\ndef gap_fit_rounded(year: float) -> int:\n    return round(gap_fit(year))\n"""
     path.write_text(content, encoding="utf-8")
 
 
@@ -377,6 +432,7 @@ def main() -> None:
     parser.add_argument("--find-next-coincidence", action="store_true", help="Find the next exact Gregorian-lunar coincidence year")
     parser.add_argument("--after-year", type=int, help="Search for next coincidence after this year")
     parser.add_argument("--birthday-mode", action="store_true", help="Find the next birthday coincidence after the input birth year")
+    parser.add_argument("--pretty", action="store_true", help="Print an extra human-friendly summary block")
     args = parser.parse_args()
 
     mode, input_date, sm, sd, anchor = resolve_mode(args)
@@ -392,6 +448,11 @@ def main() -> None:
         write_plot(rows, result, out / "fit.png")
 
     exact = [r.year for r in rows if r.gap_days == 0]
+    predicted = None
+    predicted_row = None
+    next_year = None
+    next_row = None
+
     print("Done.")
     print(f"Mode: {mode}")
     if input_date:
@@ -408,10 +469,10 @@ def main() -> None:
 
     if args.predict_year is not None:
         predicted = fitted_value(args.predict_year, result)
+        predicted_row = get_row_for_year(rows, args.predict_year)
         print(f"Predicted fitted gap for {args.predict_year}: {predicted:.4f} days, rounded {round(predicted)} days")
-        row = get_row_for_year(rows, args.predict_year)
-        if row and row.gap_days is not None:
-            print(f"Actual gap for {args.predict_year}: {row.gap_days} days; matched lunar date: {row.lunar_match_date}")
+        if predicted_row and predicted_row.gap_days is not None:
+            print(f"Actual gap for {args.predict_year}: {predicted_row.gap_days} days; matched lunar date: {predicted_row.lunar_match_date}")
         else:
             print(f"Actual gap for {args.predict_year}: unavailable in generated range {args.start}-{args.end}")
 
@@ -433,6 +494,19 @@ def main() -> None:
                 print(f"Years after input date: {next_year - input_date.year}")
             if next_row and next_row.solar_anchor:
                 print(f"Coincidence date: {next_row.solar_anchor}")
+
+    if args.pretty:
+        print(format_pretty_summary(
+            result,
+            exact,
+            input_date=input_date,
+            predict_year=args.predict_year,
+            predicted_gap=predicted,
+            predicted_row=predicted_row,
+            next_year=next_year,
+            next_row=next_row,
+            birthday_mode=args.birthday_mode,
+        ))
 
 
 if __name__ == "__main__":
