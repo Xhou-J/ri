@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lunar-gap-fit"
+version = "0.1.0"
+description = "Analyze and Fourier-fit day gaps between Gregorian dates and Chinese lunar dates."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "shuojia xu" }]
+keywords = ["lunar-calendar", "gregorian-calendar", "fourier", "calendar", "date-analysis"]
+dependencies = ["numpy>=1.23", "matplotlib>=3.7"]
+
+[project.urls]
+Homepage = "https://github.com/Xhou-J/ri"
+Issues = "https://github.com/Xhou-J/ri/issues"
+
+[project.scripts]
+lunar-gap-fit = "lunar_gap_fit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
