@@ -1,5 +1,9 @@
 # Lunar Gap Fit
 
+[![Tests](https://github.com/Xhou-J/ri/actions/workflows/tests.yml/badge.svg)](https://github.com/Xhou-J/ri/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+
 A small Python tool for studying how a Gregorian date and its corresponding Chinese lunar date drift across years.
 
 It can:
