@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Sequence
 
 from .calendar import LunarAnchor, lunar_label, solar_to_lunar
 from .export import write_csv, write_formula_py, write_json, write_plot, write_report
@@ -18,6 +20,19 @@ from .features import (
 )
 from .fitting import fit_fourier
 from .series import build_gap_series
+
+
+class CliUsageError(ValueError):
+    """User-facing CLI validation error."""
+
+
+@dataclass(frozen=True)
+class RunMode:
+    mode: str
+    input_date: date | None
+    solar_month: int
+    solar_day: int
+    lunar_anchor: LunarAnchor
 
 
 def parse_gregorian_date(value: str) -> date:
@@ -61,26 +76,63 @@ def parse_number_list(value: str, cast=float) -> list:
     return items
 
 
-def resolve_mode(args: argparse.Namespace):
+def validate_period(value: str) -> str:
+    if value.lower() == "auto":
+        return value
+    try:
+        period = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--period must be 'auto' or a positive number.") from exc
+    if period <= 0:
+        raise argparse.ArgumentTypeError("--period must be positive.")
+    return value
+
+
+def validate_harmonics(value: str) -> str:
+    if value.lower() == "auto":
+        return value
+    try:
+        harmonics = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--harmonics must be 'auto' or a positive integer.") from exc
+    if harmonics < 1:
+        raise argparse.ArgumentTypeError("--harmonics must be at least 1.")
+    return value
+
+
+def resolve_mode(args: argparse.Namespace) -> RunMode:
     manual_fields = [args.solar is not None, args.lunar_month is not None, args.lunar_day is not None]
     if any(manual_fields):
         if not all(manual_fields):
-            raise ValueError("Manual mode requires --solar, --lunar-month, and --lunar-day together.")
+            raise CliUsageError("Manual mode requires --solar, --lunar-month, and --lunar-day together.")
         if args.date:
-            raise ValueError("Use either auto mode date OR manual mode, not both.")
+            raise CliUsageError("Use either auto mode date OR manual mode, not both.")
         solar_month, solar_day = args.solar
         if not (1 <= args.lunar_month <= 12):
-            raise ValueError("--lunar-month must be 1..12.")
+            raise CliUsageError("--lunar-month must be 1..12.")
         if not (1 <= args.lunar_day <= 30):
-            raise ValueError("--lunar-day must be 1..30.")
+            raise CliUsageError("--lunar-day must be 1..30.")
         lunar_anchor = LunarAnchor(0, args.lunar_month, args.lunar_day, bool(args.lunar_leap))
-        return "manual", None, solar_month, solar_day, lunar_anchor
+        return RunMode("manual", None, solar_month, solar_day, lunar_anchor)
 
     if not args.date:
-        raise ValueError("Provide a Gregorian date, or use manual mode with --solar --lunar-month --lunar-day.")
+        raise CliUsageError("Provide a Gregorian date, or use manual mode with --solar --lunar-month --lunar-day.")
     input_dt = parse_gregorian_date(args.date)
     input_lunar = solar_to_lunar(input_dt)
-    return "auto", input_dt, input_dt.month, input_dt.day, input_lunar
+    return RunMode("auto", input_dt, input_dt.month, input_dt.day, input_lunar)
+
+
+def resolve_output_dir(args: argparse.Namespace, run_mode: RunMode) -> Path:
+    if args.out:
+        return Path(args.out)
+    if run_mode.mode == "auto":
+        assert run_mode.input_date is not None
+        return Path(f"out_{run_mode.input_date.isoformat()}")
+    leap = "leap_" if run_mode.lunar_anchor.is_leap else ""
+    return Path(
+        f"out_solar_{run_mode.solar_month:02d}_{run_mode.solar_day:02d}_"
+        f"lunar_{leap}{run_mode.lunar_anchor.month:02d}_{run_mode.lunar_anchor.day:02d}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -93,9 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--match-same-gregorian-year", action="store_true", help="Force matched lunar date to be in the same Gregorian year as the solar anchor.")
     parser.add_argument("--start", type=int, default=1901, help="start year, default 1901")
     parser.add_argument("--end", type=int, default=2100, help="end year, default 2100")
-    parser.add_argument("--period", default="auto", help="Fourier period, number or 'auto'. Default: auto")
-    parser.add_argument("--candidate-periods", default="8,11,19,38,57,76,95,114,133,152,171,190", help="Comma-separated periods scanned when --period auto.")
-    parser.add_argument("--harmonics", default="auto", help="Number of harmonics, integer or 'auto'. Default: auto")
+    parser.add_argument("--period", type=validate_period, default="auto", help="Fourier period, number or 'auto'. Default: auto")
+    parser.add_argument("--candidate-periods", type=parse_number_list, default=parse_number_list("8,11,19,38,57,76,95,114,133,152,171,190"), help="Comma-separated periods scanned when --period auto.")
+    parser.add_argument("--harmonics", type=validate_harmonics, default="auto", help="Number of harmonics, integer or 'auto'. Default: auto")
     parser.add_argument("--predict-year", type=int, help="Print fitted gap prediction for a target year.")
     parser.add_argument("--find-next-coincidence", action="store_true", help="Find the next exact coincidence year where gap_days == 0.")
     parser.add_argument("--after-year", type=int, help="Start next-coincidence search after this year.")
@@ -106,42 +158,34 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-    mode, input_dt, solar_month, solar_day, lunar_anchor = resolve_mode(args)
+def run(args: argparse.Namespace) -> None:
+    run_mode = resolve_mode(args)
 
-    if args.birthday_mode and mode != "auto":
-        raise ValueError("--birthday-mode requires auto mode with a Gregorian birth date.")
+    if args.birthday_mode and run_mode.mode != "auto":
+        raise CliUsageError("--birthday-mode requires auto mode with a Gregorian birth date.")
 
-    if args.out:
-        out_dir = Path(args.out)
-    elif mode == "auto":
-        out_dir = Path(f"out_{input_dt.isoformat()}")
-    else:
-        leap = "leap_" if lunar_anchor.is_leap else ""
-        out_dir = Path(f"out_solar_{solar_month:02d}_{solar_day:02d}_lunar_{leap}{lunar_anchor.month:02d}_{lunar_anchor.day:02d}")
+    out_dir = resolve_output_dir(args, run_mode)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rows = build_gap_series(
-        solar_month=solar_month,
-        solar_day=solar_day,
-        lunar_anchor=lunar_anchor,
+        solar_month=run_mode.solar_month,
+        solar_day=run_mode.solar_day,
+        lunar_anchor=run_mode.lunar_anchor,
         start_year=args.start,
         end_year=args.end,
         same_gregorian_year=args.match_same_gregorian_year,
     )
     result = fit_fourier(
         rows=rows,
-        mode=mode,
-        input_date=input_dt,
-        solar_month=solar_month,
-        solar_day=solar_day,
-        lunar_anchor=lunar_anchor,
+        mode=run_mode.mode,
+        input_date=run_mode.input_date,
+        solar_month=run_mode.solar_month,
+        solar_day=run_mode.solar_day,
+        lunar_anchor=run_mode.lunar_anchor,
         same_gregorian_year=args.match_same_gregorian_year,
         period_arg=args.period,
         harmonics_arg=args.harmonics,
-        candidate_periods=parse_number_list(args.candidate_periods, float),
+        candidate_periods=args.candidate_periods,
     )
 
     write_csv(rows, out_dir / "gap_series.csv")
@@ -153,13 +197,13 @@ def main() -> None:
 
     hits = exact_years(rows)
     print("Done.")
-    print(f"Mode: {mode}")
-    if input_dt:
-        print(f"Input Gregorian date: {input_dt.isoformat()}")
-        print(f"Auto lunar anchor: {lunar_label(lunar_anchor)}")
+    print(f"Mode: {run_mode.mode}")
+    if run_mode.input_date:
+        print(f"Input Gregorian date: {run_mode.input_date.isoformat()}")
+        print(f"Auto lunar anchor: {lunar_label(run_mode.lunar_anchor)}")
     else:
-        print(f"Manual solar anchor: {solar_month:02d}-{solar_day:02d}")
-        print(f"Manual lunar anchor: {lunar_label(lunar_anchor, include_year=False)}")
+        print(f"Manual solar anchor: {run_mode.solar_month:02d}-{run_mode.solar_day:02d}")
+        print(f"Manual lunar anchor: {lunar_label(run_mode.lunar_anchor, include_year=False)}")
     print(f"Match mode: {result.match_mode}")
     print(f"Selected period: {result.selected_period:g} ({result.period_mode})")
     print(f"Selected harmonics: {result.selected_harmonics} ({result.harmonics_mode})")
@@ -176,8 +220,8 @@ def main() -> None:
     if args.find_next_coincidence:
         if args.after_year is not None:
             after_year = args.after_year
-        elif input_dt is not None:
-            after_year = input_dt.year
+        elif run_mode.input_date is not None:
+            after_year = run_mode.input_date.year
         else:
             after_year = args.start - 1
         next_row = find_next_exact_row(rows, after_year)
@@ -202,7 +246,7 @@ def main() -> None:
             years, days, total = years_and_days_between(today, target_date)
             print(f"Next birthday coincidence year: {birthday_row.year}")
             print(f"Coincidence date: {target_text}")
-            print(f"Age on that day: {birthday_age(input_dt, target_date)}")
+            print(f"Age on that day: {birthday_age(run_mode.input_date, target_date)}")
             if target_date >= today:
                 print(f"Time from today: {years} years and {days} days ({total} days total)")
 
@@ -216,10 +260,19 @@ def main() -> None:
                 prediction_row=prediction_row,
                 next_row=next_row,
                 birthday_row=birthday_row,
-                birth_date=input_dt,
+                birth_date=run_mode.input_date,
                 today=today,
             )
         )
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        run(args)
+    except (CliUsageError, argparse.ArgumentTypeError, ValueError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":
