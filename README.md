@@ -9,9 +9,10 @@ A small Python tool for studying how a Gregorian date and its corresponding Chin
 It can:
 
 - convert a Gregorian date to a Chinese lunar month/day;
-- generate a 1901–2100 year-by-year day-gap sequence;
+- generate a 1901-2100 year-by-year day-gap sequence;
 - manually compare a Gregorian anchor such as `05-08` with a lunar anchor such as lunar `3/23`;
 - fit the gap sequence with a Fourier model;
+- generate a self-contained offline `interactive.html` graph with year/date controls;
 - predict fitted gaps for a target year;
 - find the next year when the Gregorian and lunar anchors exactly coincide;
 - provide birthday-style coincidence summaries;
@@ -88,7 +89,7 @@ M-D
 MM/DD
 M/D
 MM.DD
-M.D
+M.DD
 ```
 
 Examples:
@@ -117,6 +118,24 @@ Force the matched lunar date to be inside the same Gregorian year:
 
 ```bash
 lunar-gap-fit 2004-07-24 --match-same-gregorian-year
+```
+
+## Interactive graph
+
+Every normal run now writes `interactive.html` unless `--no-interactive` is used.
+
+```bash
+lunar-gap-fit 2004-07-24 --no-plot --out out_2004_07_24
+```
+
+Open `out_2004_07_24/interactive.html` in a browser. The page is self-contained and offline: the upper area shows the fitted function, actual yearly gap points, zero line, and fit summary; the lower controls let you choose a year, drag to any day in that year, zoom, and pan.
+
+When the selected date changes, the page recomputes that exact date locally in a Web Worker: Gregorian date -> lunar anchor -> yearly gap series -> period/harmonic selection -> coefficients -> fitted curve. Cached results are reused only after a date has already completed that full calculation.
+
+Skip this output for batch runs:
+
+```bash
+lunar-gap-fit 2004-07-24 --no-interactive
 ```
 
 ## Helper options
@@ -207,6 +226,7 @@ Each run creates:
 gap_series.csv       # year-by-year gap data
 coefficients.json    # selected model, coefficients, and error metrics
 formula.py           # standalone fitted function
+interactive.html     # offline interactive graph, unless --no-interactive is used
 fit.png              # plot, unless --no-plot is used
 report.md            # short Markdown report
 ```
@@ -233,6 +253,7 @@ Manual smoke commands:
 
 ```bash
 python -m lunar_gap_fit 2004-07-24 --no-plot
+python -m lunar_gap_fit 2004-07-24 --no-plot --no-interactive
 python -m lunar_gap_fit 2005.2.4 --no-plot
 python -m lunar_gap_fit 2005/2/4 --no-plot
 python -m lunar_gap_fit 2004-07-24 --predict-year 2042 --no-plot
@@ -241,6 +262,14 @@ python -m lunar_gap_fit 2004-07-24 --birthday-mode --no-plot
 python -m lunar_gap_fit 2004-07-24 --birthday-mode --predict-year 2042 --pretty --no-plot
 ```
 
+## Calendar accuracy
+
+The project uses an encoded lunar calendar table aligned to the Hong Kong Observatory Gregorian-Lunar Calendar Conversion Table for 1901-2100. The table encoding hash is checked in tests so accidental data edits are visible.
+
+Interactive output supports Gregorian dates from 1901-01-01 through 2100-12-31. The underlying conversion helpers retain the built-in 1900-2100 table for compatibility, but 1901-2100 is the supported fitting and interactive range.
+
+Source: https://www.hko.gov.hk/en/gts/time/conversion.htm
+
 ## Notes
 
-This is a modeling and fitting tool, not an official almanac. The built-in lunar table covers 1900–2100, with 1901–2100 recommended for fitting.
+This is a modeling and fitting tool, not an official almanac. The built-in lunar table covers 1900-2100, with 1901-2100 recommended for fitting.
