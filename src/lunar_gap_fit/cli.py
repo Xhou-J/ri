@@ -19,6 +19,7 @@ from .features import (
     years_and_days_between,
 )
 from .fitting import fit_fourier
+from .interactive import validate_interactive_date, write_interactive_html
 from .series import build_gap_series
 
 
@@ -155,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pretty", action="store_true", help="Print an additional human-friendly summary block.")
     parser.add_argument("--out", default=None, help="output directory")
     parser.add_argument("--no-plot", action="store_true", help="Skip fit.png generation for faster batch tests.")
+    parser.add_argument("--no-interactive", action="store_true", help="Skip interactive.html generation.")
     return parser
 
 
@@ -163,6 +165,13 @@ def run(args: argparse.Namespace) -> None:
 
     if args.birthday_mode and run_mode.mode != "auto":
         raise CliUsageError("--birthday-mode requires auto mode with a Gregorian birth date.")
+
+    interactive_initial_date = None
+    if not args.no_interactive:
+        interactive_initial_date = (
+            run_mode.input_date if run_mode.input_date else date(2004, run_mode.solar_month, run_mode.solar_day)
+        )
+        validate_interactive_date(interactive_initial_date)
 
     out_dir = resolve_output_dir(args, run_mode)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +201,18 @@ def run(args: argparse.Namespace) -> None:
     write_json(result, out_dir / "coefficients.json")
     write_formula_py(result, out_dir / "formula.py")
     write_report(result, rows, out_dir / "report.md")
+    if not args.no_interactive:
+        assert interactive_initial_date is not None
+        write_interactive_html(
+            out_dir / "interactive.html",
+            initial_date=interactive_initial_date,
+            start_year=args.start,
+            end_year=args.end,
+            same_gregorian_year=args.match_same_gregorian_year,
+            period_arg=args.period,
+            harmonics_arg=args.harmonics,
+            candidate_periods=args.candidate_periods,
+        )
     if not args.no_plot:
         write_plot(rows, result, out_dir / "fit.png")
 
