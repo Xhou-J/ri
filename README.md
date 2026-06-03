@@ -1,30 +1,65 @@
+<div align="center">
+
 # Lunar Gap Fit
+
+**用农历-公历日期漂移数据，看见每一年之间的时间差。**
+
+**Study how a Gregorian date and its corresponding Chinese lunar date drift across years.**
 
 [![Tests](https://github.com/Xhou-J/ri/actions/workflows/tests.yml/badge.svg)](https://github.com/Xhou-J/ri/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+![Calendar](https://img.shields.io/badge/calendar-HKO%201901--2100-blue)
+![Interactive](https://img.shields.io/badge/output-interactive.html-6f42c1)
 
-A small Python tool for studying how a Gregorian date and its corresponding Chinese lunar date drift across years.
+**中文：** [这是什么](#这是什么--what--why) · [安装](#安装--install) · [快速开始](#快速开始--quick-start) · [交互函数图](#交互函数图--interactive-graph) · [输出文件](#输出文件--outputs) · [准确性](#日历准确性--calendar-accuracy)
 
-It can:
+**EN:** [What](#这是什么--what--why) · [Install](#安装--install) · [Quick Start](#快速开始--quick-start) · [Interactive Graph](#交互函数图--interactive-graph) · [Outputs](#输出文件--outputs) · [Accuracy](#日历准确性--calendar-accuracy)
 
-- convert a Gregorian date to a Chinese lunar month/day;
-- generate a 1901-2100 year-by-year day-gap sequence;
-- manually compare a Gregorian anchor such as `05-08` with a lunar anchor such as lunar `3/23`;
-- fit the gap sequence with a Fourier model;
-- generate a self-contained offline `interactive.html` graph with year/date controls;
-- predict fitted gaps for a target year;
-- find the next year when the Gregorian and lunar anchors exactly coincide;
-- provide birthday-style coincidence summaries;
-- export CSV data, model coefficients, a standalone fitted function, a plot, and a Markdown report.
+</div>
 
-## Why this exists
+---
 
-Some Gregorian-lunar date pairs appear to repeat near a 19-year rhythm, but the actual sequence is not a simple sine wave. It behaves more like a sawtooth-like quasi-periodic sequence with calendar corrections, leap months, and slow envelope changes.
+## 这是什么 · What & Why
 
-This tool turns that intuition into data.
+| 中文 | English |
+| --- | --- |
+| Lunar Gap Fit 是一个轻量 Python 工具，用来研究某个公历日期与对应农历日期在 1901-2100 年之间如何漂移。 | Lunar Gap Fit is a lightweight Python tool for studying how a Gregorian date and its corresponding Chinese lunar date drift between 1901 and 2100. |
+| 它会把每一年同一公历月日与匹配农历日期之间的差值做成序列，再用 Fourier 模型拟合这个序列。 | It builds a year-by-year day-gap sequence and fits that sequence with a Fourier model. |
+| 你可以用它找出下一次“公历生日”和“农历生日”同一天出现的年份，也可以直接看交互式函数图。 | You can use it to find the next solar/lunar birthday coincidence, or inspect the fitted shape in an interactive graph. |
 
-## Install
+它适合回答这类问题：
+
+- `2004-07-24` 对应的农历日期，在之后哪些年份会再次落到同一天？
+- 某个公历月日和某个农历月日之间，每年的差值如何变化？
+- 这个变化是否接近 19 年、38 年、76 年等周期？
+- 不同日期对应的函数图形形状有什么差异？
+
+It is useful for questions like:
+
+- When will the lunar date corresponding to `2004-07-24` coincide with the same Gregorian date again?
+- How does the gap between a chosen Gregorian month/day and a chosen lunar month/day change year by year?
+- Does the pattern resemble a 19-year, 38-year, or 76-year rhythm?
+- How does the fitted curve shape change when the selected date changes?
+
+---
+
+## 功能概览 · Features
+
+| 中文 | English |
+| --- | --- |
+| 公历日期转农历日期 | Convert Gregorian dates to Chinese lunar dates |
+| 生成 1901-2100 年逐年 gap 序列 | Generate 1901-2100 year-by-year gap data |
+| 自动模式：输入一个公历日期，自动取对应农历锚点 | Auto mode: input one Gregorian date and derive the lunar anchor |
+| 手动模式：指定公历月日和农历月日进行比较 | Manual mode: compare a chosen Gregorian month/day with a lunar month/day |
+| 自动选择 Fourier 周期和谐波数 | Automatically select Fourier period and harmonic count |
+| 默认生成离线 `interactive.html` 函数图 | Generate an offline `interactive.html` graph by default |
+| 支持预测年份、查找下一次重合、生日模式 | Predict target years, find next coincidences, and run birthday helpers |
+| 输出 CSV、JSON、Python 函数、PNG 图、Markdown 报告 | Export CSV, JSON, standalone Python formula, PNG plot, and Markdown report |
+
+---
+
+## 安装 · Install
 
 ```bash
 git clone https://github.com/Xhou-J/ri.git
@@ -32,19 +67,31 @@ cd ri
 pip install -e .
 ```
 
-Or install requirements only:
+只安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Quick start
+Install requirements only:
 
-Auto mode:
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 快速开始 · Quick Start
+
+自动模式：输入一个公历日期。
+
+Auto mode: input one Gregorian date.
 
 ```bash
 python -m lunar_gap_fit 2004-07-24 --out out_2004_07_24
 ```
+
+安装后也可以使用命令行入口：
 
 After installation, the console command also works:
 
@@ -52,7 +99,9 @@ After installation, the console command also works:
 lunar-gap-fit 2004-07-24 --out out_2004_07_24
 ```
 
-The input date can use hyphens, slashes, or dots. Single-digit month/day values are supported:
+支持这些日期格式：
+
+Supported date formats:
 
 ```text
 YYYY-MM-DD
@@ -63,7 +112,7 @@ YYYY.MM.DD
 YYYY.M.D
 ```
 
-Examples:
+示例 / Examples:
 
 ```bash
 lunar-gap-fit 2008-07-10 --out out_2008_07_10
@@ -71,9 +120,15 @@ lunar-gap-fit 2008/7/10 --out out_2008_07_10
 lunar-gap-fit 2008.7.10 --out out_2008_07_10
 ```
 
-## Manual anchor mode
+---
 
-Use this when you want to compare a chosen Gregorian month/day with a chosen lunar month/day.
+## 手动锚点模式 · Manual Anchor Mode
+
+当你想比较一个指定公历月日和一个指定农历月日时，使用手动模式。
+
+Use manual mode when you want to compare a chosen Gregorian month/day with a chosen lunar month/day.
+
+示例：公历 5 月 8 日 vs 农历三月二十三。
 
 Example: Gregorian May 8 vs lunar March 23.
 
@@ -81,7 +136,9 @@ Example: Gregorian May 8 vs lunar March 23.
 lunar-gap-fit --solar 05-08 --lunar-month 3 --lunar-day 23 --out out_0508_lunar_0323
 ```
 
-The `--solar` value supports:
+`--solar` 支持：
+
+`--solar` accepts:
 
 ```text
 MM-DD
@@ -92,21 +149,17 @@ MM.DD
 M.DD
 ```
 
-Examples:
-
-```bash
-lunar-gap-fit --solar 5-8 --lunar-month 3 --lunar-day 23
-lunar-gap-fit --solar 5/8 --lunar-month 3 --lunar-day 23
-lunar-gap-fit --solar 5.8 --lunar-month 3 --lunar-day 23
-```
-
-Leap lunar month example:
+闰月示例 / Leap lunar month example:
 
 ```bash
 lunar-gap-fit --solar 05-23 --lunar-month 4 --lunar-day 1 --lunar-leap --out out_leap_0401
 ```
 
-## Matching modes
+---
+
+## 匹配模式 · Matching Modes
+
+默认模式会选择距离公历锚点最近的农历日期。
 
 Default matching chooses the lunar date nearest to the Gregorian anchor.
 
@@ -114,43 +167,67 @@ Default matching chooses the lunar date nearest to the Gregorian anchor.
 lunar-gap-fit 2004-07-24
 ```
 
+如果必须要求匹配的农历日期落在同一个公历年份内：
+
 Force the matched lunar date to be inside the same Gregorian year:
 
 ```bash
 lunar-gap-fit 2004-07-24 --match-same-gregorian-year
 ```
 
-## Interactive graph
+---
 
-Every normal run now writes `interactive.html` unless `--no-interactive` is used.
+## 交互函数图 · Interactive Graph
+
+默认情况下，每次正常运行都会生成 `interactive.html`。
+
+Every normal run writes `interactive.html` by default.
 
 ```bash
 lunar-gap-fit 2004-07-24 --no-plot --out out_2004_07_24
 ```
 
-Open `out_2004_07_24/interactive.html` in a browser. The page is self-contained and offline: the upper area shows the fitted function, actual yearly gap points, zero line, and fit summary; the lower controls let you choose a year, drag to any day in that year, zoom, and pan.
+打开 `out_2004_07_24/interactive.html` 后，你会看到：
 
-When the selected date changes, the page recomputes that exact date locally in a Web Worker: Gregorian date -> lunar anchor -> yearly gap series -> period/harmonic selection -> coefficients -> fitted curve. Cached results are reused only after a date has already completed that full calculation.
+Open `out_2004_07_24/interactive.html` to inspect:
 
-Skip this output for batch runs:
+| 中文 | English |
+| --- | --- |
+| 上方：精细函数图、实际 gap 点、零线和拟合摘要 | Top: fitted curve, actual gap points, zero line, and fit summary |
+| 下方：年份选择、每日滑块、缩放、横向平移 | Bottom: year selector, day slider, zoom, and horizontal pan |
+| 默认中文界面，可切换英文 | Chinese UI by default, with English switching |
+| 每次日期变化都会完整重新计算，不复用旧日期系数 | Every date change recomputes fully and never reuses another date's coefficients |
+| Web Worker 后台计算，已完整算过的日期才进入 cache | A Web Worker computes in the background; cache stores only completed exact results |
+
+跳过交互页：
+
+Skip the interactive page:
 
 ```bash
 lunar-gap-fit 2004-07-24 --no-interactive
 ```
 
-## Helper options
+---
 
-Predict the fitted gap for a target year:
+## 辅助功能 · Helper Options
+
+预测某一年拟合 gap：
+
+Predict fitted gap for a target year:
 
 ```bash
 lunar-gap-fit 2004-07-24 --predict-year 2042
 ```
 
-Find the next exact coincidence year after the input year:
+查找输入年份之后的下一次精确重合：
+
+Find the next exact coincidence after the input year:
 
 ```bash
 lunar-gap-fit 2004-07-24 --find-next-coincidence
 ```
+
+从指定年份之后开始搜索：
 
 Search after a specific year:
 
@@ -158,19 +235,15 @@ Search after a specific year:
 lunar-gap-fit 2004-07-24 --find-next-coincidence --after-year 2026
 ```
 
+生日模式：
+
 Birthday shortcut:
 
 ```bash
 lunar-gap-fit 2004-07-24 --birthday-mode
 ```
 
-Print an additional human-friendly summary block:
-
-```bash
-lunar-gap-fit 2004-07-24 --birthday-mode --predict-year 2042 --pretty --no-plot
-```
-
-Common helper flags:
+常用辅助参数 / Common helper flags:
 
 ```text
 --predict-year YEAR
@@ -180,76 +253,85 @@ Common helper flags:
 --pretty
 ```
 
-Example pretty output:
+---
 
-```text
-== Lunar Gap Fit Summary ==
-Solar anchor      : 07-24
-Lunar anchor      : 6/8
-Match mode        : nearest
-Best Fourier fit  : period=76, harmonics=1
-Fit error         : MAE=9.40 days, RMSE=26.31 days
-Exact years       : 1909, 1928, 1939, 1958, 2004, 2042, 2061, 2080
-Prediction 2042   : fitted gap 0.12 days, rounded 0 days; actual 0 days
-Next birthday hit : 2042-07-24 (age 38)
-Time from today   : 16 years and 56 days (5900 days total)
-Output folder     : out_2004-07-24
-=============================
-```
+## 周期选择 · Period Selection
 
-## Period selection
+默认情况下，模型不会强行假设固定周期，而是自动扫描候选周期和谐波数。
 
-By default, the model does not assume one fixed period.
+By default, the model scans candidate periods and harmonic counts instead of assuming one fixed period.
 
 ```bash
 --period auto
 --harmonics auto
 ```
 
-Default candidate periods:
+默认候选周期 / Default candidate periods:
 
 ```text
 8, 11, 19, 38, 57, 76, 95, 114, 133, 152, 171, 190
 ```
 
-Use a fixed period and harmonic count if you want a specific model:
+固定周期和谐波数：
+
+Use a fixed period and harmonic count:
 
 ```bash
 lunar-gap-fit 2004-07-24 --period 95 --harmonics 40
 ```
 
-## Outputs
+---
 
-Each run creates:
+## 输出文件 · Outputs
 
 ```text
-gap_series.csv       # year-by-year gap data
-coefficients.json    # selected model, coefficients, and error metrics
-formula.py           # standalone fitted function
-interactive.html     # offline interactive graph, unless --no-interactive is used
-fit.png              # plot, unless --no-plot is used
-report.md            # short Markdown report
+gap_series.csv       # 逐年 gap 数据 / year-by-year gap data
+coefficients.json    # 模型、系数和误差指标 / model, coefficients, and error metrics
+formula.py           # 独立 Python 拟合函数 / standalone fitted function
+interactive.html     # 离线交互函数图 / offline interactive graph
+fit.png              # 静态图，除非使用 --no-plot / static plot unless --no-plot is used
+report.md            # Markdown 报告 / Markdown report
 ```
 
-## Gap definition
+---
+
+## Gap 定义 · Gap Definition
 
 ```text
 gap(Y) = matched lunar-anchor date - date(Y, solar_month, solar_day)
 ```
 
-Positive means the lunar date is later.  
-Negative means the lunar date is earlier.  
-Zero means exact coincidence.
+| 值 | 中文 | English |
+| --- | --- | --- |
+| 正数 | 农历匹配日期更晚 | lunar date is later |
+| 负数 | 农历匹配日期更早 | lunar date is earlier |
+| 0 | 精确重合 | exact coincidence |
 
-## Development
+---
 
-Run tests:
+## 日历准确性 · Calendar Accuracy
+
+本项目使用内置编码农历表，并以香港天文台 Gregorian-Lunar Calendar Conversion Table 1901-2100 作为数据口径。测试会校验表编码 hash 和若干代表日期，避免日历表被误改后仍然“自洽但不准确”。
+
+The project uses an encoded built-in lunar table aligned with the Hong Kong Observatory Gregorian-Lunar Calendar Conversion Table for 1901-2100. Tests check the table hash and representative dates so accidental table edits are visible.
+
+交互页支持公历日期范围：`1901-01-01` 到 `2100-12-31`。
+
+Interactive output supports Gregorian dates from `1901-01-01` through `2100-12-31`.
+
+Source: https://www.hko.gov.hk/en/gts/time/conversion.htm
+
+---
+
+## 开发 · Development
+
+运行测试 / Run tests:
 
 ```bash
 python tests/test_basic.py
 ```
 
-Manual smoke commands:
+手动 smoke 命令 / Manual smoke commands:
 
 ```bash
 python -m lunar_gap_fit 2004-07-24 --no-plot
@@ -262,14 +344,10 @@ python -m lunar_gap_fit 2004-07-24 --birthday-mode --no-plot
 python -m lunar_gap_fit 2004-07-24 --birthday-mode --predict-year 2042 --pretty --no-plot
 ```
 
-## Calendar accuracy
+---
 
-The project uses an encoded lunar calendar table aligned to the Hong Kong Observatory Gregorian-Lunar Calendar Conversion Table for 1901-2100. The table encoding hash is checked in tests so accidental data edits are visible.
+## 说明 · Notes
 
-Interactive output supports Gregorian dates from 1901-01-01 through 2100-12-31. The underlying conversion helpers retain the built-in 1900-2100 table for compatibility, but 1901-2100 is the supported fitting and interactive range.
+这是建模和拟合工具，不是官方历书。
 
-Source: https://www.hko.gov.hk/en/gts/time/conversion.htm
-
-## Notes
-
-This is a modeling and fitting tool, not an official almanac. The built-in lunar table covers 1900-2100, with 1901-2100 recommended for fitting.
+This is a modeling and fitting tool, not an official almanac.
