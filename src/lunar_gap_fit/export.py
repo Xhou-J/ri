@@ -3,12 +3,24 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import asdict
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
 
-from .fitting import fitted_value
+from .calendar import (
+    CALENDAR_SOURCE_NAME,
+    CALENDAR_SOURCE_URL,
+    LUNAR_INFO,
+    LUNAR_INFO_SHA256,
+    SUPPORTED_FIT_END,
+    SUPPORTED_FIT_START,
+    lunar_label,
+    solar_to_lunar,
+)
+from .fitting import fit_fourier, fitted_value
 from .models import FitResult, GapRow
+from .series import build_gap_series
 
 
 def write_csv(rows: list[GapRow], path: Path) -> None:
@@ -131,3 +143,139 @@ def write_plot(rows: list[GapRow], result: FitResult, path: Path) -> None:
     plt.tight_layout()
     plt.savefig(path, dpi=180)
     plt.close()
+
+
+def day_of_year(dt: date) -> int:
+    return (dt - date(dt.year, 1, 1)).days + 1
+
+
+def days_in_year(year: int) -> int:
+    return 366 if date(year, 12, 31).timetuple().tm_yday == 366 else 365
+
+
+def date_from_day_of_year(year: int, day_index: int) -> date:
+    return date(year, 1, 1) + timedelta(days=day_index - 1)
+
+
+def validate_interactive_date(dt: date) -> None:
+    if dt < SUPPORTED_FIT_START or dt > SUPPORTED_FIT_END:
+        raise ValueError(
+            "Interactive output supports Gregorian dates from "
+            f"{SUPPORTED_FIT_START.isoformat()} through {SUPPORTED_FIT_END.isoformat()}."
+        )
+
+
+def compute_interactive_fit(
+    dt: date,
+    *,
+    start_year: int,
+    end_year: int,
+    same_gregorian_year: bool,
+    period_arg: str,
+    harmonics_arg: str,
+    candidate_periods: list[float],
+) -> dict:
+    validate_interactive_date(dt)
+    lunar_anchor = solar_to_lunar(dt)
+    rows = build_gap_series(dt.month, dt.day, lunar_anchor, start_year, end_year, same_gregorian_year)
+    result = fit_fourier(
+        rows=rows,
+        mode="interactive",
+        input_date=dt,
+        solar_month=dt.month,
+        solar_day=dt.day,
+        lunar_anchor=lunar_anchor,
+        same_gregorian_year=same_gregorian_year,
+        period_arg=period_arg,
+        harmonics_arg=harmonics_arg,
+        candidate_periods=candidate_periods,
+    )
+    usable = [row for row in rows if row.gap_days is not None]
+    curve = [
+        {"year": year / 10, "gap": fitted_value(year / 10, result)}
+        for year in range(result.start_year * 10, result.end_year * 10 + 1)
+    ]
+    return {
+        "date": dt.isoformat(),
+        "year": dt.year,
+        "dayOfYear": day_of_year(dt),
+        "daysInYear": days_in_year(dt.year),
+        "lunar": asdict(lunar_anchor),
+        "lunarLabel": lunar_label(lunar_anchor),
+        "rows": [asdict(row) for row in usable],
+        "fit": asdict(result),
+        "curve": curve,
+    }
+
+
+def write_interactive_html(
+    path: Path,
+    *,
+    initial_date: date,
+    start_year: int,
+    end_year: int,
+    same_gregorian_year: bool,
+    period_arg: str,
+    harmonics_arg: str,
+    candidate_periods: list[float],
+) -> None:
+    payload = {
+        "calendar": {
+            "source": CALENDAR_SOURCE_NAME,
+            "sourceUrl": CALENDAR_SOURCE_URL,
+            "supportedStart": SUPPORTED_FIT_START.isoformat(),
+            "supportedEnd": SUPPORTED_FIT_END.isoformat(),
+            "lunarInfoSha256": LUNAR_INFO_SHA256,
+            "lunarInfo": LUNAR_INFO,
+        },
+        "options": {
+            "startYear": start_year,
+            "endYear": end_year,
+            "sameGregorianYear": same_gregorian_year,
+            "periodArg": period_arg,
+            "harmonicsArg": harmonics_arg,
+            "candidatePeriods": candidate_periods,
+        },
+        "initial": compute_interactive_fit(
+            initial_date,
+            start_year=start_year,
+            end_year=end_year,
+            same_gregorian_year=same_gregorian_year,
+            period_arg=period_arg,
+            harmonics_arg=harmonics_arg,
+            candidate_periods=candidate_periods,
+        ),
+    }
+    html = INTERACTIVE_TEMPLATE.replace("__PAYLOAD__", json.dumps(payload, ensure_ascii=False))
+    html = html.replace("__WORKER__", json.dumps(INTERACTIVE_WORKER))
+    path.write_text(html, encoding="utf-8")
+
+
+INTERACTIVE_WORKER = r"""
+let P=null,L=null;const B=Date.UTC(1900,0,31),MAX=Date.UTC(2100,11,31),DAY=86400000;
+const u=(y,m,d)=>Date.UTC(y,m-1,d),iso=ms=>new Date(ms).toISOString().slice(0,10),doy=(y,m,d)=>Math.floor((u(y,m,d)-u(y,1,1))/DAY)+1,diy=y=>doy(y,12,31),from=(y,d)=>{let x=new Date(u(y,1,1)+(d-1)*DAY);return[x.getUTCFullYear(),x.getUTCMonth()+1,x.getUTCDate()]};
+const lm=y=>L[y-1900]&15,ld=y=>lm(y)?(L[y-1900]&65536?30:29):0,md=(y,m)=>L[y-1900]&(65536>>m)?30:29,yd=y=>{let t=348,i=L[y-1900],b=32768;while(b>8){if(i&b)t++;b>>=1}return t+ld(y)};
+function sol(y,m,d){let ms=u(y,m,d);if(ms<B||ms>MAX)throw Error("Supported solar date range is 1900-01-31 through 2100-12-31.");let off=Math.floor((ms-B)/DAY),ly=1900;while(ly<=2100){let n=yd(ly);if(off<n)break;off-=n;ly++}for(let mo=1;mo<=12;mo++){let n=md(ly,mo);if(off<n)return{year:ly,month:mo,day:off+1,is_leap:false};off-=n;if(mo===lm(ly)){n=ld(ly);if(off<n)return{year:ly,month:mo,day:off+1,is_leap:true};off-=n}}throw Error("lunar conversion failed")}
+function lun(l){if(l.year<1900||l.year>2100||l.month<1||l.month>12||l.day<1||l.day>30)return null;if(l.is_leap&&lm(l.year)!==l.month)return null;let mx=l.is_leap?ld(l.year):md(l.year,l.month);if(l.day>mx)return null;let off=0;for(let y=1900;y<l.year;y++)off+=yd(y);for(let m=1;m<l.month;m++){off+=md(l.year,m);if(lm(l.year)===m)off+=ld(l.year)}if(l.is_leap)off+=md(l.year,l.month);let ms=B+(off+l.day-1)*DAY;return ms<=MAX?ms:null}
+function anchor(s,mo,da,leap,same){let sy=new Date(s).getUTCFullYear(),c=[];for(let y=sy-1;y<=sy+1;y++){let ms=lun({year:y,month:mo,day:da,is_leap:leap});if(ms==null)continue;if(same&&new Date(ms).getUTCFullYear()!==sy)continue;c.push([Math.abs((ms-s)/DAY),ms,y])}if(!c.length)return[null,null];c.sort((a,b)=>a[0]-b[0]||a[1]-b[1]);return[c[0][1],c[0][2]]}
+function rows(sm,sd,l,start,end,same){let a=[];for(let y=start;y<=end;y++){let s=u(y,sm,sd);if(new Date(s).getUTCMonth()+1!==sm){a.push({year:y,solar_anchor:"",lunar_match_date:null,gap_days:null});continue}let r=anchor(s,l.month,l.day,l.is_leap,same);a.push({year:y,solar_anchor:iso(s),lunar_match_date:r[0]==null?null:iso(r[0]),lunar_year_of_match:r[1],lunar_month:l.month,lunar_day:l.day,lunar_is_leap:l.is_leap,match_mode:same?"same_gregorian_year":"nearest",gap_days:r[0]==null?null:Math.round((r[0]-s)/DAY)})}return a}
+function solve(A,b){let n=b.length,M=A.map((r,i)=>r.concat([b[i]]));for(let i=0;i<n;i++){let m=i;for(let r=i+1;r<n;r++)if(Math.abs(M[r][i])>Math.abs(M[m][i]))m=r;[M[i],M[m]]=[M[m],M[i]];let p=M[i][i]||1e-12;for(let c=i;c<=n;c++)M[i][c]/=p;for(let r=0;r<n;r++){if(r===i)continue;let f=M[r][i];for(let c=i;c<=n;c++)M[r][c]-=f*M[i][c]}}return M.map(r=>r[n])}
+const des=(y,p,h,y0)=>{let r=[1],t=y-y0;for(let k=1;k<=h;k++){let a=2*Math.PI*k*t/p;r.push(Math.cos(a),Math.sin(a))}return r},val=(y,c,p,h,y0)=>{let t=c[0];for(let k=1;k<=h;k++){let a=2*Math.PI*k*(y-y0)/p;t+=c[1+2*(k-1)]*Math.cos(a)+c[2+2*(k-1)]*Math.sin(a)}return t};
+function one(Y,G,p,h,y0){let n=1+2*h,A=Array.from({length:n},()=>Array(n).fill(0)),b=Array(n).fill(0);for(let i=0;i<Y.length;i++){let x=des(Y[i],p,h,y0);for(let r=0;r<n;r++){b[r]+=x[r]*G[i];for(let c=0;c<n;c++)A[r][c]+=x[r]*x[c]}}for(let i=0;i<n;i++)A[i][i]+=1e-9;let c=solve(A,b),mean=G.reduce((a,b)=>a+b,0)/G.length,rss=0,ab=0,den=0;for(let i=0;i<G.length;i++){let e=G[i]-val(Y[i],c,p,h,y0);rss+=e*e;ab+=Math.abs(e);den+=(G[i]-mean)**2}return{coef:c,mae:ab/G.length,rmse:Math.sqrt(rss/G.length),r2:den?1-rss/den:NaN,bic:G.length*Math.log(Math.max(rss/G.length,1e-12))+n*Math.log(G.length)}}
+function fit(R,o,dt,l){let U=R.filter(r=>r.gap_days!=null),Y=U.map(r=>r.year),G=U.map(r=>r.gap_days),y0=Math.min(...Y),ps=o.periodArg.toLowerCase()==="auto"?o.candidatePeriods:[Number(o.periodArg)],hs=o.harmonicsArg.toLowerCase()==="auto"?[1,2,3,5,8,12,16,24,32,40].filter(h=>h<=Math.max(1,Math.floor((U.length-2)/2))):[Math.max(1,Math.min(Number(o.harmonicsArg),Math.floor((U.length-2)/2)))],best=null,e=0;for(const p of ps)for(const h of hs){if(p<=0||1+2*h>=U.length)continue;let f=one(Y,G,p,h,y0),r={...f,period:p,h};e++;if(!best||r.bic<best.bic)best=r}let c=best.coef;return{mode:"interactive",input_date:dt,solar_month:+dt.slice(5,7),solar_day:+dt.slice(8,10),input_lunar:l,match_mode:o.sameGregorianYear?"same_gregorian_year":"nearest",start_year:y0,end_year:Math.max(...Y),period_mode:o.periodArg.toLowerCase()==="auto"?"auto":"manual",selected_period:best.period,harmonics_mode:o.harmonicsArg.toLowerCase()==="auto"?"auto":"manual",selected_harmonics:best.h,intercept:c[0],cos_coefficients:Array.from({length:best.h},(_,i)=>c[1+2*i]),sin_coefficients:Array.from({length:best.h},(_,i)=>c[2+2*i]),mae:best.mae,rmse:best.rmse,r2:best.r2,bic:best.bic,usable_points:U.length,skipped_points:R.length-U.length,period_candidates:ps,harmonic_candidates:hs,candidates_evaluated:e}}
+function fval(y,f){let t=f.intercept;for(let k=1;k<=f.selected_harmonics;k++){let a=2*Math.PI*k*(y-f.start_year)/f.selected_period;t+=f.cos_coefficients[k-1]*Math.cos(a)+f.sin_coefficients[k-1]*Math.sin(a)}return t}
+function compute(year,day){let o=P.options,x=from(year,day),dt=iso(u(x[0],x[1],x[2])),l=sol(x[0],x[1],x[2]),R=rows(x[1],x[2],l,o.startYear,o.endYear,o.sameGregorianYear),F=fit(R,o,dt,l),C=[];for(let y=F.start_year*10;y<=F.end_year*10;y++)C.push({year:y/10,gap:fval(y/10,F)});return{date:dt,year,dayOfYear:day,daysInYear:diy(year),lunar:l,lunarLabel:(l.is_leap?"Leap ":"")+l.year+"-"+l.month+"-"+l.day,rows:R.filter(r=>r.gap_days!=null),fit:F,curve:C}}
+self.onmessage=e=>{if(e.data.payload){P=e.data.payload;L=P.calendar.lunarInfo;return}try{self.postMessage({id:e.data.id,result:compute(e.data.year,e.data.day)})}catch(err){self.postMessage({id:e.data.id,error:err.message||String(err)})}};
+"""
+
+
+INTERACTIVE_TEMPLATE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lunar Gap Interactive Fit</title><style>
+:root{color-scheme:light;--bg:#f5f7fb;--panel:rgba(255,255,255,.88);--text:#172033;--muted:#667085;--line:#dbe4f0;--blue:#176dff;--green:#1a8f66;--shadow:0 22px 70px rgba(31,45,75,.12);--radius:8px}*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;color:var(--text);background:linear-gradient(180deg,#fbfcff 0%,var(--bg) 64%,#eef3fb 100%)}.app{width:min(1280px,calc(100vw - 36px));margin:0 auto;padding:28px 0}header{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;margin-bottom:18px}h1{margin:0;font-size:30px;line-height:1.08;letter-spacing:0}.sub,.note,.read{color:var(--muted);font-size:13px}.status{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:var(--radius);background:#ffffffb8;color:var(--muted);white-space:nowrap}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(26,143,102,.12)}.panel{background:var(--panel);border:1px solid #d2dbe8;border-radius:var(--radius);box-shadow:var(--shadow);backdrop-filter:blur(18px)}.chart{padding:18px}.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:12px}.metric{min-height:58px;padding:10px 12px;border:1px solid #e5ebf5;border-radius:var(--radius);background:#ffffffb8}.label{color:var(--muted);font-size:11px;text-transform:uppercase}.val{margin-top:5px;font-size:17px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}canvas{display:block;width:100%;height:min(58vh,560px);min-height:380px;border:1px solid #e1e8f3;border-radius:var(--radius);background:white;cursor:grab}canvas:active{cursor:grabbing}.controls{display:grid;grid-template-columns:150px 1fr 150px 170px;gap:12px;align-items:end;margin-top:14px;padding:14px}label{display:grid;gap:7px;color:var(--muted);font-size:12px;font-weight:600}input,select{width:100%;min-height:36px;border:1px solid #cfd9e8;border-radius:var(--radius);background:white;color:var(--text);font:inherit;padding:6px 9px}input[type=range]{padding:0;accent-color:var(--blue)}.read{display:flex;justify-content:space-between;gap:12px;margin-top:10px}.note{margin-top:12px;line-height:1.5}@media(max-width:900px){header{align-items:flex-start;flex-direction:column}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.controls{grid-template-columns:1fr}canvas{min-height:320px;height:420px}}
+</style></head><body><main class="app"><header><div><h1>Lunar Gap Interactive Fit</h1><div class="sub">Every selected date recomputes its lunar anchor, yearly gap series, and full Fourier fit.</div></div><div class="status"><span class="dot"></span><span id="statusText">Ready</span></div></header><section class="panel chart"><div class="metrics"><div class="metric"><div class="label">Date</div><div class="val" id="mDate">-</div></div><div class="metric"><div class="label">Lunar Anchor</div><div class="val" id="mLunar">-</div></div><div class="metric"><div class="label">Model</div><div class="val" id="mModel">-</div></div><div class="metric"><div class="label">MAE / RMSE</div><div class="val" id="mError">-</div></div><div class="metric"><div class="label">Exact Years</div><div class="val" id="mExact">-</div></div></div><canvas id="chart" width="1400" height="680" aria-label="Interactive lunar gap Fourier chart"></canvas><div class="read"><span id="leftReadout">-</span><span id="rightReadout">-</span></div></section><section class="panel controls"><label>Year<select id="yearSelect"></select></label><label>Date in selected year<input id="daySlider" type="range" min="1" max="366" value="1"></label><label>Zoom<input id="zoomSlider" type="range" min="1" max="20" value="1" step=".1"></label><label>View position<input id="panSlider" type="range" min="0" max="1000" value="500"></label></section><div class="note">Calendar source: Hong Kong Observatory Gregorian-Lunar Calendar Conversion Table, 1901-2100. Calculations are performed locally in this file; cached results are reused only after the selected date has been fully computed once.</div></main><script id="payload" type="application/json">__PAYLOAD__</script><script>
+const WORKER_SOURCE=__WORKER__,P=JSON.parse(document.getElementById("payload").textContent),S={data:P.initial,cache:new Map(),zoom:1,pan:.5,drag:false,dragX:0,dragPan:.5};
+const W=new Worker(URL.createObjectURL(new Blob([WORKER_SOURCE],{type:"text/javascript"})));W.postMessage({payload:P});let seq=0,E={canvas:chart,status:statusText,year:yearSelect,day:daySlider,zoom:zoomSlider,pan:panSlider,left:leftReadout,right:rightReadout,mDate,mLunar,mModel,mError,mExact};for(let y=1901;y<=2100;y++){let o=document.createElement("option");o.value=o.textContent=String(y);E.year.appendChild(o)}E.year.value=S.data.year;E.day.max=S.data.daysInYear;E.day.value=S.data.dayOfYear;const key=(y,d)=>`${y}-${d}`;S.cache.set(key(S.data.year,S.data.dayOfYear),S.data);const diy=y=>Math.round((Date.UTC(y+1,0,1)-Date.UTC(y,0,1))/86400000),dateOf=(y,d)=>new Date(Date.UTC(y,0,d)).toISOString().slice(0,10);
+function stat(t,a=false){E.status.textContent=t;document.querySelector(".dot").style.background=a?"#176dff":"#1a8f66"}function req(y,d){E.day.max=diy(y);d=Math.max(1,Math.min(+d,+E.day.max));E.day.value=d;let k=key(y,d);if(S.cache.has(k)){S.data=S.cache.get(k);stat("Loaded from exact cache");draw();pre(y,d);return}let id=++seq;stat(`Computing ${dateOf(y,d)}...`,true);W.postMessage({id,year:y,day:d})}W.onmessage=e=>{let{id,result,error}=e.data;if(result)S.cache.set(key(result.year,result.dayOfYear),result);if(id!==seq)return;if(error){stat(error);return}S.data=result;stat("Ready");draw();pre(result.year,result.dayOfYear)};function pre(y,d){for(const q of[-3,-2,-1,1,2,3]){let n=d+q;if(n>=1&&n<=diy(y)&&!S.cache.has(key(y,n)))W.postMessage({id:-Math.floor(Math.random()*1e9),year:y,day:n})}}
+function metrics(){let d=S.data,f=d.fit,ex=d.rows.filter(r=>r.gap_days===0).map(r=>r.year);E.mDate.textContent=d.date;E.mLunar.textContent=d.lunarLabel;E.mModel.textContent=`P ${f.selected_period.toFixed(0)} / H ${f.selected_harmonics}`;E.mError.textContent=`${f.mae.toFixed(2)} / ${f.rmse.toFixed(2)}`;E.mExact.textContent=ex.length?ex.slice(0,4).join(", ")+(ex.length>4?"...":""):"None";E.left.textContent=`Day ${d.dayOfYear} of ${d.daysInYear}`;E.right.textContent=`${d.rows.length} yearly samples / ${f.candidates_evaluated} models evaluated`}
+function draw(){metrics();let c=E.canvas,ctx=c.getContext("2d"),r=devicePixelRatio||1,b=c.getBoundingClientRect();c.width=Math.max(900,b.width*r);c.height=Math.max(420,b.height*r);ctx.setTransform(r,0,0,r,0,0);let w=c.width/r,h=c.height/r,p={l:58,r:24,t:24,b:42},R=S.data.rows,C=S.data.curve,ys=R.map(x=>x.gap_days).concat(C.map(x=>x.gap)),minY=Math.floor(Math.min(...ys)/10)*10-10,maxY=Math.ceil(Math.max(...ys)/10)*10+10,fx=S.data.fit.start_year,tx=S.data.fit.end_year,sp=(tx-fx)/S.zoom,minX=fx+(tx-fx-sp)*S.pan,maxX=minX+sp,x=v=>p.l+(v-minX)/(maxX-minX)*(w-p.l-p.r),y=v=>h-p.b-(v-minY)/(maxY-minY)*(h-p.t-p.b);ctx.clearRect(0,0,w,h);ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);ctx.strokeStyle="#e8eef7";ctx.fillStyle="#8490a3";ctx.font="12px -apple-system,BlinkMacSystemFont,sans-serif";for(let gy=Math.ceil(minY/20)*20;gy<=maxY;gy+=20){ctx.beginPath();ctx.moveTo(p.l,y(gy));ctx.lineTo(w-p.r,y(gy));ctx.stroke();ctx.fillText(String(gy),12,y(gy)+4)}for(let gx=Math.ceil(minX/10)*10;gx<=maxX;gx+=10){ctx.beginPath();ctx.moveTo(x(gx),p.t);ctx.lineTo(x(gx),h-p.b);ctx.stroke();ctx.fillText(String(gx),x(gx)-14,h-14)}ctx.strokeStyle="#9aa8bd";ctx.beginPath();ctx.moveTo(p.l,y(0));ctx.lineTo(w-p.r,y(0));ctx.stroke();ctx.strokeStyle="#176dff";ctx.lineWidth=2.25;ctx.beginPath();let on=false;for(const q of C){if(q.year<minX||q.year>maxX)continue;if(!on){ctx.moveTo(x(q.year),y(q.gap));on=true}else ctx.lineTo(x(q.year),y(q.gap))}ctx.stroke();ctx.fillStyle="rgba(23,109,255,.28)";for(const q of R){if(q.year<minX||q.year>maxX)continue;ctx.beginPath();ctx.arc(x(q.year),y(q.gap_days),2.4,0,Math.PI*2);ctx.fill()}}
+E.year.onchange=()=>req(+E.year.value,Math.min(+E.day.value,diy(+E.year.value)));E.day.oninput=()=>req(+E.year.value,+E.day.value);E.zoom.oninput=()=>{S.zoom=+E.zoom.value;draw()};E.pan.oninput=()=>{S.pan=+E.pan.value/1000;draw()};E.canvas.onpointerdown=e=>{S.drag=true;S.dragX=e.clientX;S.dragPan=S.pan;E.canvas.setPointerCapture(e.pointerId)};E.canvas.onpointermove=e=>{if(!S.drag)return;S.pan=Math.max(0,Math.min(1,S.dragPan+(S.dragX-e.clientX)/E.canvas.getBoundingClientRect().width/S.zoom));E.pan.value=Math.round(S.pan*1000);draw()};E.canvas.onpointerup=()=>S.drag=false;addEventListener("resize",draw);draw();pre(S.data.year,S.data.dayOfYear);
+</script></body></html>"""
