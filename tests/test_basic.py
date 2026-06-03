@@ -188,14 +188,21 @@ def test_cli_no_interactive_skips_html():
         assert not (out_dir / "interactive.html").exists()
 
 
-def test_interactive_html_is_offline_and_precise():
+def test_interactive_html_is_offline_precise_and_multilingual():
     with tempfile.TemporaryDirectory() as tmp:
         out_dir = Path(tmp) / "interactive"
         result = run_cli("2004-07-24", "--no-plot", "--out", str(out_dir))
         assert result.returncode == 0, result.stderr
 
         html = (out_dir / "interactive.html").read_text(encoding="utf-8")
+        assert 'lang="zh-CN"' in html
+        assert "农历 Gap 交互函数图" in html
+        assert "每个选中日期都会重新计算" in html
+        assert "所选年份中的日期" in html
+        assert 'id="langSelect"' in html
+        assert "English" in html
         assert "Lunar Gap Interactive Fit" in html
+        assert "Date in selected year" in html
         assert "yearSelect" in html
         assert "daySlider" in html
         assert "zoomSlider" in html
@@ -302,7 +309,7 @@ if __name__ == "__main__":
     test_birthday_age_and_countdown()
     test_cli_auto_success_writes_expected_outputs()
     test_cli_no_interactive_skips_html()
-    test_interactive_html_is_offline_and_precise()
+    test_interactive_html_is_offline_precise_and_multilingual()
     test_cli_slash_date_and_manual_success()
     test_cli_helper_flags_success()
     test_cli_usage_errors_are_friendly()
